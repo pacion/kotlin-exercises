@@ -18,7 +18,17 @@ class BiggestCompanyService(
     val companyWithHighestRevenue = _companyWithHighestRevenue
 
     fun updateHighestRevenueCompany() {
-        // TODO
+        backgroundScope.launch {
+            val companies = companyRepository.getCompanyList()
+            if (companies.isNotEmpty()) {
+                val companyDetailsDeferred = companies.map { company ->
+                    async { companyRepository.getCompanyDetails(company.id) }
+                }
+                val companyDetails = companyDetailsDeferred.awaitAll()
+                val companyWithMaxRevenue = companyDetails.maxByOrNull { it.revenue }
+                _companyWithHighestRevenue.value = companyWithMaxRevenue
+            }
+        }
     }
 }
 
@@ -96,7 +106,10 @@ class BiggestCompanyServiceTest {
         assertEquals(3, repo.getDetailsCallCount, "After that time all details should be fetched")
 
         testScope.advanceUntilIdle()
-        assertEquals(DelayedFakeCompanyRepo.GET_COMPANY_LIST_DELAY + DelayedFakeCompanyRepo.GET_COMPANY_DETAILS_DELAY, testScope.currentTime)
+        assertEquals(
+            DelayedFakeCompanyRepo.GET_COMPANY_LIST_DELAY + DelayedFakeCompanyRepo.GET_COMPANY_DETAILS_DELAY,
+            testScope.currentTime
+        )
     }
 }
 
@@ -128,7 +141,7 @@ class DelayedFakeCompanyRepo : CompanyRepository {
     override suspend fun getCompanyDetails(id: String): CompanyDetails {
         getDetailsCallCount++
         delay(DelayedFakeCompanyRepo.GET_COMPANY_DETAILS_DELAY)
-        return when(id) {
+        return when (id) {
             "1" -> CompanyDetails("1", "Company A", 500.0, 50)
             "2" -> CompanyDetails("2", "Company B", 1000.0, 100)
             "3" -> CompanyDetails("3", "Company C", 750.0, 75)
