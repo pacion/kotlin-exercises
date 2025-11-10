@@ -26,12 +26,58 @@ class CommentService(
         collectionKey: String,
         body: AddComment
     ) {
-        TODO()
+        if (!commentValidator.validate(body.comment)) {
+            throw CommentValidationException("Comment validation failed")
+        }
+
+        val userId = userService.readUserId(token)
+
+        val commentModel = commentModelFactory.toCommentModel(userId, collectionKey, body)
+        commentRepository.addComment(commentModel)
+
+        backgroundScope.launch {
+            val observers = commentRepository.getCollectionKeyObservers(collectionKey)
+            observers.map { observerId ->
+                launch {
+                    val observer = userService.findUserById(observerId)
+                    emailService.notifyAboutCommentInObservedCollection(
+                        email = observer.email,
+                        collectionKey = collectionKey,
+                        comment = commentModel.comment
+                    )
+                }
+            }
+        }
     }
 
-    suspend fun getComments(
-        collectionKey: String
-    ): CommentsCollection = TODO()
+    suspend fun getComments(collectionKey: String): CommentsCollection {
+        val comments = commentRepository.getComments(collectionKey)
+        val userIds = comments.map { it.userId }.toSet()
+
+        val users = coroutineScope {
+            userIds.map { userId ->
+                async {
+                    userId to userService.findUserById(userId)
+                }
+            }.awaitAll().toMap()
+        }
+
+        val elements = comments.map { comment ->
+            val user = users[comment.userId] ?: throw NoSuchUserException
+            CommentElement(
+                id = comment.id,
+                collectionKey = comment.collectionKey,
+                user = user,
+                comment = comment.comment,
+                date = comment.date
+            )
+        }
+
+        return CommentsCollection(
+            collectionKey = collectionKey,
+            elements = elements
+        )
+    }
 
     // For legacy blocking calls
     fun addCommentBlocking(
@@ -39,13 +85,13 @@ class CommentService(
         collectionKey: String,
         body: AddComment
     ) {
-        TODO()
+        runBlocking { addComment(token, collectionKey, body) }
     }
 
     // For legacy blocking calls
     fun getCommentsBlocking(
         collectionKey: String
-    ): CommentsCollection = TODO()
+    ): CommentsCollection = runBlocking { getComments(collectionKey) }
 }
 
 interface CommentRepository {
@@ -102,7 +148,7 @@ interface UserService {
     suspend fun findUserById(id: String): User
 }
 
-object NoSuchUserException: Exception("No such user")
+object NoSuchUserException : Exception("No such user")
 
 data class CommentsCollection(
     val collectionKey: String,
@@ -624,7 +670,7 @@ class CommentServiceTests {
         uuidProvider.alwaysReturn(commentModel1.id)
         timeProvider.advanceTimeTo(commentModel1.date)
 
-         val observers = listOf(user2.id, user3.id, user4.id)
+        val observers = listOf(user2.id, user3.id, user4.id)
         commentsRepository.setObservers(collectionKey1, observers)
 
         emailService.notificationDelay = 1000
@@ -708,7 +754,7 @@ class CommentServiceTests {
         val comment4 = CommentModel(
             id = "C_ID_DEDUP_4",
             collectionKey = collectionKey1,
-            userId = user2.id, 
+            userId = user2.id,
             comment = "Another comment from user2",
             date = date1
         )
@@ -756,7 +802,7 @@ class CommentServiceTests {
         }
     }
 
-    class FakeCommentRepository: CommentRepository {
+    class FakeCommentRepository : CommentRepository {
         private var comments = listOf<CommentModel>()
         private var collectionObservers = mapOf<String, List<String>>()
 
@@ -815,13 +861,17 @@ class CommentServiceTests {
 
     class FakeEmailService : EmailService {
         private var emailsSent = mutableListOf<Pair<String, String>>()
-        var notificationDelay: Long = 1000 
+        var notificationDelay: Long = 1000
         private val concurrentNotifications = AtomicInteger(0)
         private var maxConcurrentNotifications = 0
         private val notificationStarted = AtomicBoolean(false)
         private val notificationCompleted = AtomicBoolean(false)
 
-        override suspend fun notifyAboutCommentInObservedCollection(email: String, collectionKey: String, comment: String?) {
+        override suspend fun notifyAboutCommentInObservedCollection(
+            email: String,
+            collectionKey: String,
+            comment: String?
+        ) {
             notificationStarted.set(true)
             val currentConcurrent = concurrentNotifications.incrementAndGet()
 
@@ -906,7 +956,7 @@ class CommentServiceTests {
         }
     }
 
-    class FakeUuidProvider: UuidProvider {
+    class FakeUuidProvider : UuidProvider {
         private var counter = 1
         private var constantReturn: String? = null
 
