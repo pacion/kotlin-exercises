@@ -6,13 +6,21 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import kotlin.IllegalStateException
 import kotlin.system.measureTimeMillis
 import kotlin.test.assertEquals
 
 class BestStudentUseCase(
     private val repo: StudentsRepository
 ) {
-    suspend fun getBestStudent(semester: String): Student = TODO()
+    suspend fun getBestStudent(semester: String): Student {
+        val studentIds = repo.getStudentIds(semester)
+        val students = coroutineScope {
+            studentIds.map { async { repo.getStudent(it) } }.awaitAll()
+        }
+        val student = students.maxByOrNull { it.result }
+        return student?:throw IllegalStateException("No student found")
+    }
 }
 
 data class Student(val id: Int, val result: Double, val semester: String)
