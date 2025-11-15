@@ -6,11 +6,12 @@ import kotlin.system.measureTimeMillis
 import kotlin.test.assertEquals
 
 class DiscNewsRepository(
-    private val discReader: DiscReader
+    private val discReader: DiscReader,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(200)
 ) : NewsRepository {
-    override suspend fun getNews(newsId: String): News {
+    override suspend fun getNews(newsId: String): News = withContext(dispatcher) {
         val (title, content) = discReader.read("user/$newsId")
-        return News(title, content)
+        return@withContext News(title, content)
     }
 }
 
