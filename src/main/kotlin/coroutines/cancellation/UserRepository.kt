@@ -11,14 +11,17 @@ class UserRepository(
     private val database: UserDatabaseDao,
     private val ioDispatcher: CoroutineDispatcher,
 ) {
-    suspend fun updateUser() {
-        val user = storage.readUser() // blocking
-        val userSettings = storage.readUserSettings(user.id) // blocking
+    suspend fun updateUser() = withContext(ioDispatcher) {
+        val user = withContext(ioDispatcher) { storage.readUser() }
+        val userSettings = withContext(ioDispatcher) { storage.readUserSettings(user.id) }
 
         try {
-            database.updateUserInDatabase(user, userSettings) // suspending
-        } catch (e: CancellationException) {
-            database.revertUnfinishedTransactions() // suspending
+            database.updateUserInDatabase(user, userSettings)
+        } catch (ce: CancellationException) {
+            withContext(NonCancellable) {
+                database.revertUnfinishedTransactions()
+            }
+            throw ce
         }
     }
 }
