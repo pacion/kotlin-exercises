@@ -1,9 +1,8 @@
 package coroutines.cancellation.signaturesender
 
 import kotlinx.coroutines.*
-
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
@@ -15,11 +14,14 @@ class SignatureSender(
     private val logger: Logger,
     private val ioDispatcher: CoroutineDispatcher,
 ) {
-    suspend fun sendSignature(file: File) {
+    suspend fun sendSignature(file: File) = withContext(ioDispatcher) {
         try {
-            val content = fileReader.readFile(file) // blocking
-            val signature = signatureCalculator.calculateSignature(content) // CPU-intensive function
-            signatureApi.sendSignature(signature) // suspending
+            val content = fileReader.readFile(file)
+            ensureActive()
+            val signature = signatureCalculator.calculateSignature(content)
+            signatureApi.sendSignature(signature)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             logger.logError("Error while sending signature", e)
         } finally {
