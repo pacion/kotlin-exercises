@@ -15,25 +15,39 @@ class UserArticlesSaver(
     private val storage: Storage,
     private val logger: Logger,
 ) {
-    suspend fun storeUserArticles(userId: Int) {
-        val token = tokenProvider.getToken() // suspending
-        val userDetails = client.fetchUserDetails(token, userId) // suspending
-        val userArticles = client.fetchUserArticles(token, userId) // suspending
 
-        for (article in userArticles.articles) {
-            saveArticle(article, userDetails)
+    suspend fun storeUserArticles(userId: Int) = coroutineScope {
+        val token = tokenProvider.getToken()
+
+        val userDetailsDeferred = async { client.fetchUserDetails(token, userId) }
+        val userArticlesDeferred = async { client.fetchUserArticles(token, userId) }
+
+        val userDetails = userDetailsDeferred.await()
+        val userArticles = userArticlesDeferred.await()
+
+        val jobs = userArticles.articles.map { article ->
+            async {
+                saveArticle(article, userDetails)
+            }
         }
+
+        jobs.awaitAll()
+
         client.notifyAllArticlesSaved(userId)
     }
 
-    private fun saveArticle(article: Article, userDetails: UserDetails) {
+    private suspend fun saveArticle(article: Article, userDetails: UserDetails) {
         try {
-            val articleContent = runBlocking { client.fetchArticle(article.key) } // suspending
-            val articleFile = storage.saveArticleToFile(articleContent) // blocking
-            storage.saveArticleMetadata(articleFile, articleContent, userDetails) // blocking
+            val articleContent = client.fetchArticle(article.key)
+            val articleFile = storage.saveArticleToFile(articleContent)
+            yield()
+            storage.saveArticleMetadata(articleFile, articleContent, userDetails)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             logger.log("Exception while saving article $article", e)
-            saveArticle(article, userDetails) // recursive suspending
+            client.sendInformationAboutFailure(article, e)
+            saveArticle(article, userDetails)
         }
     }
 }
@@ -41,6 +55,7 @@ class UserArticlesSaver(
 interface TokenProvider {
     suspend fun getToken(): String
 }
+
 interface Client {
     suspend fun fetchUserDetails(token: String, userId: Int): UserDetails
     suspend fun fetchUserArticles(token: String, userId: Int): UserArticles
@@ -48,13 +63,16 @@ interface Client {
     suspend fun sendInformationAboutFailure(article: Article, e: Exception): Boolean
     suspend fun notifyAllArticlesSaved(userId: Int)
 }
+
 interface Storage {
     fun saveArticleMetadata(articleFile: File, articleContent: String, userDetails: UserDetails)
     fun saveArticleToFile(articleContent: String): File
 }
+
 interface Logger {
     fun log(message: String, e: Exception? = null)
 }
+
 data class UserArticles(val articles: List<Article>)
 data class Article(val key: String)
 data class UserDetails(val userId: Int)
