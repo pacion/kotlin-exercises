@@ -3,21 +3,43 @@ package coroutines.scope.notificationsender
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Test
+import kotlin.math.log
 import kotlin.test.assertEquals
 
 class NotificationSender(
     private val client: NotificationClient,
     private val exceptionCollector: ExceptionCollector,
-    dispatcher: CoroutineDispatcher,
+    dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
-    val scope: CoroutineScope = TODO()
+    val scope: CoroutineScope = CoroutineScope(SupervisorJob() + dispatcher)
+
+    @Volatile
+    private var currentSendJob: Job? = null
 
     fun sendNotifications(notifications: List<Notification>) {
-        // TODO
+        currentSendJob?.cancel()
+
+        currentSendJob = scope.launch {
+            supervisorScope {
+                notifications
+                    .map { notification ->
+                        async {
+                            try {
+                                client.send(notification)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (t: Throwable) {
+                                exceptionCollector.collectException(t)
+                            }
+                        }
+                    }
+                    .awaitAll()
+            }
+        }
     }
 
     fun cancel() {
-        // TODO
+        currentSendJob?.cancel()
     }
 }
 
