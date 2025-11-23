@@ -13,33 +13,24 @@ class NotificationSender(
 ) {
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + dispatcher)
 
-    @Volatile
-    private var currentSendJob: Job? = null
-
     fun sendNotifications(notifications: List<Notification>) {
-        currentSendJob?.cancel()
+        val handler = CoroutineExceptionHandler { _, throwable ->
+            exceptionCollector.collectException(throwable)
+        }
 
-        currentSendJob = scope.launch {
+        scope.launch(handler) {
             supervisorScope {
-                notifications
-                    .map { notification ->
-                        async {
-                            try {
-                                client.send(notification)
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (t: Throwable) {
-                                exceptionCollector.collectException(t)
-                            }
-                        }
+                notifications.forEach { notification ->
+                    launch {
+                        client.send(notification)
                     }
-                    .awaitAll()
+                }
             }
         }
     }
 
     fun cancel() {
-        currentSendJob?.cancel()
+        scope.coroutineContext.cancelChildren()
     }
 }
 

@@ -12,8 +12,11 @@ class UserRepository(
     private val ioDispatcher: CoroutineDispatcher,
 ) {
     suspend fun updateUser() = withContext(ioDispatcher) {
-        val user = withContext(ioDispatcher) { storage.readUser() }
-        val userSettings = withContext(ioDispatcher) { storage.readUserSettings(user.id) }
+        val user = storage.readUser()
+
+        ensureActive()
+
+        val userSettings = storage.readUserSettings(user.id)
 
         try {
             database.updateUserInDatabase(user, userSettings)
@@ -24,6 +27,7 @@ class UserRepository(
             throw ce
         }
     }
+
 }
 
 interface FileStorage {
