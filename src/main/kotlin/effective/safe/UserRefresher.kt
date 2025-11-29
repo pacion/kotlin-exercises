@@ -9,8 +9,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import java.util.concurrent.ConcurrentHashMap
@@ -19,17 +17,26 @@ import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.time.measureTime
 
+
 class UserRefresher(
     private val scope: CoroutineScope,
     private val refreshData: suspend (Int) -> Unit,
 ) {
-    private var refreshJob: Job? = null
+    private val channel = Channel<Int>(Channel.UNLIMITED)
+
+    init {
+        scope.launch {
+            for (userId in channel) {
+                try {
+                    refreshData(userId)
+                } catch (e: Exception) {
+                }
+            }
+        }
+    }
 
     suspend fun refresh(userId: Int) {
-        refreshJob?.join()
-        refreshJob = scope.launch {
-            refreshData(userId)
-        }
+        channel.send(userId)
     }
 }
 
